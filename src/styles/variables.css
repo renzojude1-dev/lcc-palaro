@@ -1,0 +1,69 @@
+
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #f4f6fb;
+  background: #080f20;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  /* LCC PALARO COLOR SYSTEM */
+  --navy: #081329;
+  --navy-2: #101f3c;
+  --blue: #174a91;
+  --blue-light: #2465b7;
+  --gold: #f2bd45;
+  --gold-dark: #c99526;
+
+  --ink: #17243b;
+  --muted: #a4afc2;
+  --line: rgba(255,255,255,.10);
+  --surface: #111e36;
+  --radius: 16px;
+  --shadow: 0 15px 40px rgba(0,0,0,.22);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #080f20;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--navy);
+}
