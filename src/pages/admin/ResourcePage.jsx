@@ -1,3 +1,4 @@
+
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Plus, Search, Pencil, Trash2, X, Save, RefreshCw,
@@ -29,6 +30,7 @@ const resources = {
       ['status', 'Status', 'select', true, ['draft', 'published', 'archived']],
     ],
   },
+
   teams: {
     title: 'Teams',
     description: 'Manage delegations, branding, and registration status.',
@@ -44,6 +46,7 @@ const resources = {
       ['banner_url', 'Team banner', 'image'],
     ],
   },
+
   players: {
     title: 'Athletes & players',
     description: 'Register athletes and manage eligibility and team assignments.',
@@ -60,17 +63,19 @@ const resources = {
       ['photo_url', 'Player photo', 'image'],
     ],
   },
+
   matches: {
     title: 'Matches & live scores',
-    description: 'Choose sports and teams by name, then publish match scores.',
+    description: 'Create matches, enter venue names, and manage match schedules and scores.',
     table: 'matches',
     fields: [
       ['sport_id', 'Sport', 'sport-select', true],
-      ['division', 'Division', 'select', true, ['Boys', 'Girls']],
+      ['division', 'Division', 'select', true, ['Boys', 'Girls', 'Mixed', 'Open']],
+      ['schedule_label', 'Game label', 'text'],
       ['home_team_id', 'Home team', 'team-select', true],
       ['away_team_id', 'Away team', 'team-select', true],
       ['scheduled_at', 'Scheduled date and time', 'datetime-local'],
-      ['venue_id', 'Venue ID', 'text'],
+      ['venue_name', 'Venue', 'text'],
       ['round_name', 'Round / stage', 'text'],
       ['status', 'Match status', 'select', true, ['scheduled', 'in_progress', 'paused', 'completed', 'postponed', 'cancelled']],
       ['home_score', 'Home score', 'number'],
@@ -78,21 +83,24 @@ const resources = {
       ['is_published', 'Publish match publicly', 'checkbox'],
     ],
   },
+
   schedules: {
     title: 'Schedule management',
-    description: 'Create and update fixtures for the competition.',
+    description: 'Create and update fixtures, game labels, venues, and schedules.',
     table: 'matches',
     fields: [
       ['sport_id', 'Sport', 'sport-select', true],
-      ['division', 'Division', 'select', true, ['Boys', 'Girls']],
+      ['division', 'Division', 'select', true, ['Boys', 'Girls', 'Mixed', 'Open']],
+      ['schedule_label', 'Game label', 'text'],
       ['home_team_id', 'Home team', 'team-select', true],
       ['away_team_id', 'Away team', 'team-select', true],
-      ['scheduled_at', 'Date and time', 'datetime-local', true],
-      ['venue_id', 'Venue ID', 'text'],
+      ['scheduled_at', 'Date and time', 'datetime-local'],
+      ['venue_name', 'Venue', 'text'],
       ['round_name', 'Round / stage', 'text'],
       ['status', 'Status', 'select', true, ['scheduled', 'postponed', 'cancelled']],
     ],
   },
+
   news: {
     title: 'News & announcements',
     description: 'Draft and publish updates for participants and spectators.',
@@ -105,6 +113,7 @@ const resources = {
       ['image_url', 'Featured image', 'image'],
     ],
   },
+
   settings: {
     title: 'Website settings',
     description: 'Control the event identity and public-facing information.',
@@ -121,6 +130,7 @@ const resources = {
       ['hero_image_url', 'Homepage hero image', 'image'],
     ],
   },
+
   'best-player': {
     title: 'Best Player of the Game',
     description: 'Record the official player selection for a completed match.',
@@ -133,6 +143,7 @@ const resources = {
       ['status', 'Status', 'select', true, ['draft', 'published']],
     ],
   },
+
   'audit-log': {
     title: 'Audit log',
     description: 'Review the history of important administrative actions.',
@@ -140,6 +151,7 @@ const resources = {
     readonly: true,
     fields: [],
   },
+
   brackets: {
     title: 'Tournament brackets',
     description: 'Review tournament stages and configured competition formats.',
@@ -152,6 +164,7 @@ const resources = {
       ['status', 'Status', 'select', true, ['draft', 'published', 'completed']],
     ],
   },
+
   standings: {
     title: 'Standings',
     description: 'Review stored standings and competition results.',
@@ -168,6 +181,7 @@ const readonlyColumns = {
     ['actor_email', 'Administrator'],
     ['created_at', 'Date'],
   ],
+
   standings: [
     ['team_id', 'Team ID'],
     ['sport_id', 'Sport ID'],
@@ -181,26 +195,35 @@ const readonlyColumns = {
 
 function inputValue(key, value) {
   if (value == null) return '';
+
   if (key === 'scheduled_at' || key === 'published_at') {
     const date = new Date(value);
+
     if (Number.isNaN(date.getTime())) return '';
+
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-      .toISOString().slice(0, 16);
+      .toISOString()
+      .slice(0, 16);
   }
+
   return value;
 }
 
 function recordName(row) {
-  return row.name || row.title ||
+  return row.name ||
+    row.title ||
     [row.first_name, row.last_name].filter(Boolean).join(' ') ||
     'this record';
 }
 
 function GenericResourcePage({ resource = 'sports' }) {
   const cfg = resources[resource] || resources.sports;
+
   const [rows, setRows] = useState([]);
   const [sports, setSports] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [venues, setVenues] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -210,7 +233,11 @@ function GenericResourcePage({ resource = 'sports' }) {
   const [form, setForm] = useState({});
   const [files, setFiles] = useState({});
   const [refreshKey, setRefreshKey] = useState(0);
+
   const previews = useRef([]);
+
+  const isMatchResource =
+    resource === 'matches' || resource === 'schedules';
 
   const clearPreviews = useCallback(() => {
     previews.current.forEach((url) => URL.revokeObjectURL(url));
@@ -222,13 +249,20 @@ function GenericResourcePage({ resource = 'sports' }) {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+
     try {
       const result = await listRecords(cfg.table, {
         orderBy: 'created_at',
         limit: 500,
       });
+
       if (result.error) throw result.error;
-      setRows(cfg.single ? (result.data || []).slice(0, 1) : result.data || []);
+
+      setRows(
+        cfg.single
+          ? (result.data || []).slice(0, 1)
+          : result.data || []
+      );
     } catch (err) {
       setRows([]);
       setError(err.message || `Unable to load ${cfg.title.toLowerCase()}.`);
@@ -241,39 +275,136 @@ function GenericResourcePage({ resource = 'sports' }) {
     load();
   }, [load, refreshKey]);
 
-  // Load options from the real database; the UUID is kept as the option value.
+  // Load dropdown options and venues directly from the database.
   const loadOptions = useCallback(async () => {
-    const [sportResult, teamResult] = await Promise.all([
-      listRecords('sports', { orderBy: 'name', ascending: true, limit: 500 }),
-      listRecords('teams', { orderBy: 'name', ascending: true, limit: 500 }),
+    const [sportResult, teamResult, venueResult] = await Promise.all([
+      listRecords('sports', {
+        orderBy: 'name',
+        ascending: true,
+        limit: 500,
+      }),
+      listRecords('teams', {
+        orderBy: 'name',
+        ascending: true,
+        limit: 500,
+      }),
+      listRecords('venues', {
+        orderBy: 'name',
+        ascending: true,
+        limit: 500,
+      }),
     ]);
 
     if (sportResult.error) throw sportResult.error;
     if (teamResult.error) throw teamResult.error;
+    if (venueResult.error) throw venueResult.error;
 
     setSports(sportResult.data || []);
     setTeams(teamResult.data || []);
+    setVenues(venueResult.data || []);
   }, []);
 
   useEffect(() => {
-    if (resource === 'matches' || resource === 'schedules' || resource === 'players') {
-      loadOptions().catch((err) => setError(err.message || 'Unable to load dropdown options.'));
+    if (isMatchResource || resource === 'players') {
+      loadOptions().catch((err) => {
+        setError(err.message || 'Unable to load dropdown options.');
+      });
     }
-  }, [resource, loadOptions, refreshKey]);
+  }, [resource, isMatchResource, loadOptions, refreshKey]);
 
-  function begin(row = null) {
+  // Resolve the typed venue name to a venue UUID.
+  async function resolveVenueId(venueName) {
+    const name = String(venueName || '').trim();
+
+    if (!name) return null;
+
+    const existingVenue = venues.find(
+      (venue) => venue.name?.toLowerCase() === name.toLowerCase()
+    );
+
+    if (existingVenue) return existingVenue.id;
+
+    const { data, error: insertError } = await supabase
+      .from('venues')
+      .insert({
+        name,
+        is_active: true,
+      })
+      .select('id, name')
+      .single();
+
+    if (!insertError && data) {
+      setVenues((current) => [...current, data]);
+      return data.id;
+    }
+
+    // If another request created the venue at the same time,
+    // retrieve the existing record instead of failing.
+    const { data: existing, error: lookupError } = await supabase
+      .from('venues')
+      .select('id, name')
+      .ilike('name', name)
+      .maybeSingle();
+
+    if (!lookupError && existing) {
+      setVenues((current) => {
+        if (current.some((venue) => venue.id === existing.id)) {
+          return current;
+        }
+
+        return [...current, existing];
+      });
+
+      return existing.id;
+    }
+
+    throw insertError || lookupError || new Error('Unable to save the venue.');
+  }
+
+  async function begin(row = null) {
     clearPreviews();
+
     const initial = {};
+
     cfg.fields.forEach(([key]) => {
       let value = row?.[key];
+
       if (key === 'primary_color') value = value || '#eab83e';
       if (key === 'public_profile') value = value ?? true;
       if (key === 'is_published') value = value ?? false;
+
       if (key === 'scheduled_at' || key === 'published_at') {
         value = inputValue(key, value);
       }
+
+      if (key === 'venue_name' && row?.venue_id) {
+        value = venues.find((venue) => venue.id === row.venue_id)?.name || '';
+      }
+
       initial[key] = value ?? '';
     });
+
+    // If the venue list has not loaded yet, retrieve the venue for this record.
+    if (isMatchResource && row?.venue_id && !initial.venue_name) {
+      const { data, error: venueError } = await supabase
+        .from('venues')
+        .select('id, name')
+        .eq('id', row.venue_id)
+        .maybeSingle();
+
+      if (!venueError && data) {
+        initial.venue_name = data.name || '';
+
+        setVenues((current) => {
+          if (current.some((venue) => venue.id === data.id)) {
+            return current;
+          }
+
+          return [...current, data];
+        });
+      }
+    }
+
     setForm(initial);
     setFiles({});
     setError('');
@@ -290,17 +421,22 @@ function GenericResourcePage({ resource = 'sports' }) {
   }
 
   function change(key, value) {
-    setForm((old) => ({ ...old, [key]: value }));
+    setForm((old) => ({
+      ...old,
+      [key]: value,
+    }));
   }
 
   async function submit(event) {
     event.preventDefault();
+
     setError('');
     setNotice('');
 
     for (const [key, label, , isRequired] of cfg.fields) {
       if (isRequired) {
         const message = required(form[key], label);
+
         if (message) {
           setError(message);
           return;
@@ -309,7 +445,7 @@ function GenericResourcePage({ resource = 'sports' }) {
     }
 
     if (
-      (resource === 'matches' || resource === 'schedules') &&
+      isMatchResource &&
       form.home_team_id === form.away_team_id
     ) {
       setError('The home team and away team must be different.');
@@ -317,10 +453,12 @@ function GenericResourcePage({ resource = 'sports' }) {
     }
 
     if (
-      (resource === 'matches' || resource === 'schedules') &&
-      (!sports.some((s) => s.id === form.sport_id) ||
-       !teams.some((t) => t.id === form.home_team_id) ||
-       !teams.some((t) => t.id === form.away_team_id))
+      isMatchResource &&
+      (
+        !sports.some((sport) => sport.id === form.sport_id) ||
+        !teams.some((team) => team.id === form.home_team_id) ||
+        !teams.some((team) => team.id === form.away_team_id)
+      )
     ) {
       setError('Select a valid sport and both teams from the dropdowns.');
       return;
@@ -329,6 +467,7 @@ function GenericResourcePage({ resource = 'sports' }) {
     for (const file of Object.values(files)) {
       if (file) {
         const issue = validateImage(file);
+
         if (issue) {
           setError(issue);
           return;
@@ -337,13 +476,28 @@ function GenericResourcePage({ resource = 'sports' }) {
     }
 
     setSaving(true);
+
     try {
       const payload = { ...form };
 
+      // Convert the free-text venue name into a database venue UUID.
+      if (isMatchResource) {
+        payload.venue_id = await resolveVenueId(form.venue_name);
+
+        // venue_name is an admin form field, not a matches table column.
+        delete payload.venue_name;
+
+        payload.schedule_label =
+          String(form.schedule_label || '').trim() || null;
+      }
+
       for (const [key, file] of Object.entries(files)) {
         if (!file) continue;
+
         const uploaded = await uploadImage(file, resource);
+
         if (uploaded.error) throw uploaded.error;
+
         payload[key] = uploaded.url;
       }
 
@@ -353,42 +507,67 @@ function GenericResourcePage({ resource = 'sports' }) {
             payload[key] = null;
           } else {
             const number = Number(payload[key]);
-            if (!Number.isFinite(number) || number < 0 || !Number.isInteger(number)) {
+
+            if (
+              !Number.isFinite(number) ||
+              number < 0 ||
+              !Number.isInteger(number)
+            ) {
               throw new Error(`${key} must be a non-negative whole number.`);
             }
+
             payload[key] = number;
           }
         }
 
-        if (type === 'checkbox') payload[key] = Boolean(payload[key]);
-
-        if (type === 'datetime-local') {
-          payload[key] = payload[key] ? new Date(payload[key]).toISOString() : null;
+        if (type === 'checkbox') {
+          payload[key] = Boolean(payload[key]);
         }
 
-        if (payload[key] === '') payload[key] = null;
+        if (type === 'datetime-local') {
+          payload[key] = payload[key]
+            ? new Date(payload[key]).toISOString()
+            : null;
+        }
+
+        if (payload[key] === '') {
+          payload[key] = null;
+        }
       }
 
       const id = editing === 'new' ? null : editing;
+
       const result = await saveRecord(cfg.table, payload, id);
+
       if (result.error) throw result.error;
 
       closeForm();
       setNotice('Record saved successfully.');
       setRefreshKey((value) => value + 1);
-    } catch (err) {      setError(err.message || 'Unable to save the record.');
+    } catch (err) {
+      setError(err.message || 'Unable to save the record.');
     } finally {
       setSaving(false);
     }
   }
 
   async function remove(row) {
-    if (!window.confirm(`Delete "${recordName(row)}"? This cannot be undone.`)) return;
+    if (
+      !window.confirm(
+        `Delete "${recordName(row)}"? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
     setError('');
     setNotice('');
+
     try {
       const result = await deleteRecord(cfg.table, row.id);
+
       if (result.error) throw result.error;
+
       setNotice('Record deleted successfully.');
       setRefreshKey((value) => value + 1);
     } catch (err) {
@@ -398,15 +577,25 @@ function GenericResourcePage({ resource = 'sports' }) {
 
   function selectImage(key, file) {
     if (!file) return;
+
     const issue = validateImage(file);
+
     if (issue) {
       setError(issue);
       return;
     }
+
     setError('');
+
     const url = URL.createObjectURL(file);
+
     previews.current.push(url);
-    setFiles((old) => ({ ...old, [key]: file }));
+
+    setFiles((old) => ({
+      ...old,
+      [key]: file,
+    }));
+
     change(key, url);
   }
 
@@ -421,6 +610,7 @@ function GenericResourcePage({ resource = 'sports' }) {
       return (
         <select {...common}>
           <option value="">Select a sport</option>
+
           {sports.map((sport) => (
             <option value={sport.id} key={sport.id}>
               {sport.name}
@@ -434,9 +624,11 @@ function GenericResourcePage({ resource = 'sports' }) {
       return (
         <select {...common}>
           <option value="">Select a team</option>
+
           {teams.map((team) => (
             <option value={team.id} key={team.id}>
-              {team.name}{team.abbreviation ? ` (${team.abbreviation})` : ''}
+              {team.name}
+              {team.abbreviation ? ` (${team.abbreviation})` : ''}
             </option>
           ))}
         </select>
@@ -447,8 +639,11 @@ function GenericResourcePage({ resource = 'sports' }) {
       return (
         <select {...common}>
           <option value="">Select {label.toLowerCase()}</option>
+
           {(options || []).map((option) => (
-            <option value={option} key={option}>{titleCase(option)}</option>
+            <option value={option} key={option}>
+              {titleCase(option)}
+            </option>
           ))}
         </select>
       );
@@ -474,9 +669,19 @@ function GenericResourcePage({ resource = 'sports' }) {
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={(event) => selectImage(key, event.target.files?.[0])}
+            onChange={(event) =>
+              selectImage(key, event.target.files?.[0])
+            }
           />
-          {form[key] && <img src={form[key]} alt={`${label} preview`} className="image-preview" />}
+
+          {form[key] && (
+            <img
+              src={form[key]}
+              alt={`${label} preview`}
+              className="image-preview"
+            />
+          )}
+
           <small>Image file · maximum 5 MB.</small>
         </span>
       );
@@ -493,12 +698,26 @@ function GenericResourcePage({ resource = 'sports' }) {
   }
 
   const filtered = rows.filter((row) =>
-    JSON.stringify(row).toLowerCase().includes(search.toLowerCase().trim())
+    JSON.stringify(row)
+      .toLowerCase()
+      .includes(search.toLowerCase().trim())
   );
 
-  const columns = cfg.readonly
+  let columns = cfg.readonly
     ? readonlyColumns[resource] || []
     : cfg.fields.map(([key, label]) => [key, label]).slice(0, 5);
+
+  if (isMatchResource) {
+    columns = [
+      ['sport_id', 'Sport'],
+      ['division', 'Division'],
+      ['schedule_label', 'Game'],
+      ['home_team_id', 'Home team'],
+      ['away_team_id', 'Away team'],
+      ['scheduled_at', 'Date and time'],
+      ['venue_id', 'Venue'],
+    ];
+  }
 
   return (
     <>
@@ -510,7 +729,9 @@ function GenericResourcePage({ resource = 'sports' }) {
           <button
             type="button"
             className="button button-dark"
-            onClick={() => begin(cfg.single && rows.length ? rows[0] : null)}
+            onClick={() =>
+              begin(cfg.single && rows.length ? rows[0] : null)
+            }
           >
             <Plus size={16} />
             {cfg.single && rows.length ? 'Edit settings' : 'Add new'}
@@ -518,17 +739,28 @@ function GenericResourcePage({ resource = 'sports' }) {
         )}
       />
 
-      {notice && !editing && <Notice type="success">{notice}</Notice>}
+      {notice && !editing && (
+        <Notice type="success">{notice}</Notice>
+      )}
+
       {error && <Notice type="error">{error}</Notice>}
 
       {editing && (
         <div className="admin-panel edit-panel">
           <div className="panel-heading">
             <div>
-              <h2>{editing === 'new' ? 'Create record' : 'Edit record'}</h2>
+              <h2>
+                {editing === 'new' ? 'Create record' : 'Edit record'}
+              </h2>
               <p>Fields marked with * are required.</p>
             </div>
-            <button type="button" className="icon-button" onClick={closeForm} aria-label="Close form">
+
+            <button
+              type="button"
+              className="icon-button"
+              onClick={closeForm}
+              aria-label="Close form"
+            >
               <X />
             </button>
           </div>
@@ -537,14 +769,23 @@ function GenericResourcePage({ resource = 'sports' }) {
             <div className="form-grid">
               {cfg.fields.map((field) => {
                 const [key, label, type, isRequired] = field;
-                const fullWidth = type === 'textarea' || type === 'image';
+                const fullWidth =
+                  type === 'textarea' || type === 'image';
+
                 return (
-                  <label className={fullWidth ? 'form-field-full' : ''} key={key}>
-                    {label}{isRequired ? ' *' : ''}
+                  <label
+                    className={fullWidth ? 'form-field-full' : ''}
+                    key={key}
+                  >
+                    {label}
+                    {isRequired ? ' *' : ''}
+
                     {type === 'checkbox' ? (
                       <span className="checkbox-field">
                         {renderField(field)}
-                        {key === 'is_published' ? 'Publish this match publicly' : 'Enable this option'}
+                        {key === 'is_published'
+                          ? 'Publish this match publicly'
+                          : 'Enable this option'}
                       </span>
                     ) : (
                       renderField(field)
@@ -554,19 +795,36 @@ function GenericResourcePage({ resource = 'sports' }) {
               })}
             </div>
 
-            {(resource === 'matches' || resource === 'schedules') && (
+            {isMatchResource && (
               <p>
-                Team and sport dropdowns use database records. UUIDs are saved
-                automatically; you do not need to type IDs.
+                Select sports and teams from the dropdowns. You can type
+                any venue name directly. Date and time are optional.
+                Use the Game label field for labels such as Game 1,
+                Game 2, Semifinals, or Finals.
               </p>
             )}
 
             <div className="form-actions">
-              <button type="button" className="button button-light" onClick={closeForm} disabled={saving}>
+              <button
+                type="button"
+                className="button button-light"
+                onClick={closeForm}
+                disabled={saving}
+              >
                 Cancel
               </button>
-              <button type="submit" className="button button-dark" disabled={saving}>
-                {saving ? <RefreshCw className="spin-icon" size={16} /> : <Save size={16} />}
+
+              <button
+                type="submit"
+                className="button button-dark"
+                disabled={saving}
+              >
+                {saving ? (
+                  <RefreshCw className="spin-icon" size={16} />
+                ) : (
+                  <Save size={16} />
+                )}
+
                 {saving ? 'Saving…' : 'Save record'}
               </button>
             </div>
@@ -578,12 +836,22 @@ function GenericResourcePage({ resource = 'sports' }) {
         <LoadingState />
       ) : rows.length === 0 ? (
         <EmptyState
-          title={cfg.single ? 'Settings have not been configured' : 'No records yet'}
-          description={cfg.readonly
-            ? 'Records will appear here when activity is recorded.'
-            : 'Create your first record to begin managing this section.'}
+          title={
+            cfg.single
+              ? 'Settings have not been configured'
+              : 'No records yet'
+          }
+          description={
+            cfg.readonly
+              ? 'Records will appear here when activity is recorded.'
+              : 'Create your first record to begin managing this section.'
+          }
           action={!cfg.readonly && (
-            <button type="button" className="button button-light" onClick={() => begin()}>
+            <button
+              type="button"
+              className="button button-light"
+              onClick={() => begin()}
+            >
               <Plus size={16} /> Create record
             </button>
           )}
@@ -593,12 +861,14 @@ function GenericResourcePage({ resource = 'sports' }) {
           <div className="table-toolbar">
             <label className="search-field">
               <Search size={16} />
+
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search records…"
               />
             </label>
+
             <span>{filtered.length} records</span>
           </div>
 
@@ -606,24 +876,55 @@ function GenericResourcePage({ resource = 'sports' }) {
             <table>
               <thead>
                 <tr>
-                  {columns.map(([key, label]) => <th key={key}>{label}</th>)}
-                  {!cfg.readonly && <th className="actions-col">Actions</th>}
+                  {columns.map(([key, label]) => (
+                    <th key={key}>{label}</th>
+                  ))}
+
+                  {!cfg.readonly && (
+                    <th className="actions-col">Actions</th>
+                  )}
                 </tr>
               </thead>
+
               <tbody>
                 {filtered.map((row) => (
                   <tr key={row.id}>
                     {columns.map(([key]) => {
                       let value = row[key];
-                      if (resource === 'matches' || resource === 'schedules') {
-                        if (key === 'sport_id') value = sports.find((item) => item.id === value)?.name || value;
-                        if (key === 'home_team_id') value = teams.find((item) => item.id === value)?.name || value;
-                        if (key === 'away_team_id') value = teams.find((item) => item.id === value)?.name || value;
+
+                      if (isMatchResource) {
+                        if (key === 'sport_id') {
+                          value =
+                            sports.find((item) => item.id === value)?.name ||
+                            value;
+                        }
+
+                        if (key === 'home_team_id') {
+                          value =
+                            teams.find((item) => item.id === value)?.name ||
+                            value;
+                        }
+
+                        if (key === 'away_team_id') {
+                          value =
+                            teams.find((item) => item.id === value)?.name ||
+                            value;
+                        }
+
+                        if (key === 'venue_id') {
+                          value =
+                            venues.find((item) => item.id === value)?.name ||
+                            '—';
+                        }
                       }
+
                       return (
                         <td key={key}>
                           {key.includes('color') && value ? (
-                            <span className="color-value"><i style={{ background: value }} />{value}</span>
+                            <span className="color-value">
+                              <i style={{ background: value }} />
+                              {value}
+                            </span>
                           ) : key.endsWith('_at') && value ? (
                             formatDateTime(value)
                           ) : typeof value === 'boolean' ? (
@@ -634,13 +935,27 @@ function GenericResourcePage({ resource = 'sports' }) {
                         </td>
                       );
                     })}
+
                     {!cfg.readonly && (
                       <td>
                         <div className="table-actions">
-                          <button type="button" className="icon-button" title="Edit" aria-label="Edit record" onClick={() => begin(row)}>
+                          <button
+                            type="button"
+                            className="icon-button"
+                            title="Edit"
+                            aria-label="Edit record"
+                            onClick={() => begin(row)}
+                          >
                             <Pencil size={15} />
                           </button>
-                          <button type="button" className="icon-button danger-icon" title="Delete" aria-label="Delete record" onClick={() => remove(row)}>
+
+                          <button
+                            type="button"
+                            className="icon-button danger-icon"
+                            title="Delete"
+                            aria-label="Delete record"
+                            onClick={() => remove(row)}
+                          >
                             <Trash2 size={15} />
                           </button>
                         </div>
@@ -648,9 +963,14 @@ function GenericResourcePage({ resource = 'sports' }) {
                     )}
                   </tr>
                 ))}
+
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={columns.length + (cfg.readonly ? 0 : 1)}>No matching records found.</td>
+                    <td
+                      colSpan={columns.length + (cfg.readonly ? 0 : 1)}
+                    >
+                      No matching records found.
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -663,8 +983,7 @@ function GenericResourcePage({ resource = 'sports' }) {
 }
 
 
-// Manual bracket creator. This is kept in the existing ResourcePage file and
-// uses the existing tournament_stages, bracket_entries, and generate_bracket.
+// Manual bracket creator.
 function ManualBracketBuilder() {
   const [sports, setSports] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -672,6 +991,7 @@ function ManualBracketBuilder() {
   const [bracketName, setBracketName] = useState('');
   const [division, setDivision] = useState('Boys');
   const [teamOrder, setTeamOrder] = useState(['', '']);
+
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [savingBracket, setSavingBracket] = useState(false);
   const [bracketError, setBracketError] = useState('');
@@ -691,6 +1011,7 @@ function ManualBracketBuilder() {
             ascending: true,
             limit: 500,
           }),
+
           listRecords('teams', {
             orderBy: 'name',
             ascending: true,
@@ -704,6 +1025,7 @@ function ManualBracketBuilder() {
         if (!active) return;
 
         setSports(sportResult.data || []);
+
         setTeams(
           (teamResult.data || []).filter((team) =>
             team.status !== 'withdrawn' &&
@@ -712,7 +1034,9 @@ function ManualBracketBuilder() {
         );
       } catch (err) {
         if (active) {
-          setBracketError(err.message || 'Unable to load sports and teams.');
+          setBracketError(
+            err.message || 'Unable to load sports and teams.'
+          );
         }
       } finally {
         if (active) setLoadingOptions(false);
@@ -720,7 +1044,10 @@ function ManualBracketBuilder() {
     }
 
     loadOptions();
-    return () => { active = false; };
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const selectedTeamIds = teamOrder.filter(Boolean);
@@ -739,23 +1066,37 @@ function ManualBracketBuilder() {
   }
 
   function removeTeamSlot(index) {
-    setTeamOrder((current) => current.filter((_, i) => i !== index));
+    setTeamOrder((current) =>
+      current.filter((_, i) => i !== index)
+    );
   }
 
   function moveTeamSlot(index, direction) {
     setTeamOrder((current) => {
       const next = [...current];
       const target = index + direction;
+
       if (target < 0 || target >= next.length) return current;
-      [next[index], next[target]] = [next[target], next[index]];
+
+      [next[index], next[target]] = [
+        next[target],
+        next[index],
+      ];
+
       return next;
     });
   }
 
   function getTeamName(teamId) {
-    return teams.find((team) => team.id === teamId)?.name || 'Unselected team';
-  }  async function handleCreateBracket(event) {
+    return (
+      teams.find((team) => team.id === teamId)?.name ||
+      'Unselected team'
+    );
+  }
+
+  async function handleCreateBracket(event) {
     event.preventDefault();
+
     setBracketError('');
     setBracketNotice('');
 
@@ -782,6 +1123,7 @@ function ManualBracketBuilder() {
     }
 
     setSavingBracket(true);
+
     let createdStageId = null;
 
     try {
@@ -790,15 +1132,20 @@ function ManualBracketBuilder() {
         orderBy: 'stage_order',
         ascending: false,
         limit: 500,
-        filters: { sport_id: sportId },
+        filters: {
+          sport_id: sportId,
+        },
       });
 
       if (existingStages.error) throw existingStages.error;
 
-      const nextStageOrder = Math.max(
-        0,
-        ...(existingStages.data || []).map((stage) => Number(stage.stage_order || 0))
-      ) + 1;
+      const nextStageOrder =
+        Math.max(
+          0,
+          ...(existingStages.data || []).map((stage) =>
+            Number(stage.stage_order || 0)
+          )
+        ) + 1;
 
       const stageResult = await saveRecord(
         'tournament_stages',
@@ -818,8 +1165,11 @@ function ManualBracketBuilder() {
       );
 
       if (stageResult.error) throw stageResult.error;
+
       if (!stageResult.data?.id) {
-        throw new Error('The tournament stage was saved, but no stage ID was returned.');
+        throw new Error(
+          'The tournament stage was saved, but no stage ID was returned.'
+        );
       }
 
       createdStageId = stageResult.data.id;
@@ -847,30 +1197,41 @@ function ManualBracketBuilder() {
       if (bracketResult.error) throw bracketResult.error;
 
       const matchCount = Number(bracketResult.data || 0);
+
       setBracketNotice(
         `Bracket created successfully. ${matchCount} first-round match(es) generated using your exact team order.`
       );
+
       setBracketName('');
       setTeamOrder(['', '']);
     } catch (err) {
-      // Removing the stage also removes its bracket entries through ON DELETE CASCADE.
+      // Removing the stage also removes bracket entries through ON DELETE CASCADE.
       if (createdStageId) {
-        const cleanup = await deleteRecord('tournament_stages', createdStageId);
+        const cleanup = await deleteRecord(
+          'tournament_stages',
+          createdStageId
+        );
+
         if (cleanup.error) {
           setBracketError(
             `${err.message || 'Unable to create bracket.'} The incomplete stage could not be removed: ${cleanup.error.message}`
           );
+
           setSavingBracket(false);
           return;
         }
       }
-      setBracketError(err.message || 'Unable to create the bracket.');
+
+      setBracketError(
+        err.message || 'Unable to create the bracket.'
+      );
     } finally {
       setSavingBracket(false);
     }
   }
 
   const firstRound = [];
+
   for (let index = 0; index < selectedTeamIds.length; index += 2) {
     firstRound.push({
       first: selectedTeamIds[index],
@@ -879,7 +1240,10 @@ function ManualBracketBuilder() {
   }
 
   return (
-    <section className="admin-panel" style={{ padding: 24, marginBottom: 24 }}>
+    <section
+      className="admin-panel"
+      style={{ padding: 24, marginBottom: 24 }}
+    >
       <div className="panel-heading">
         <div>
           <h2>Manual Bracket Creator</h2>
@@ -890,13 +1254,21 @@ function ManualBracketBuilder() {
         </div>
       </div>
 
-      {bracketError && <Notice type="error">{bracketError}</Notice>}
-      {bracketNotice && <Notice type="success">{bracketNotice}</Notice>}
+      {bracketError && (
+        <Notice type="error">{bracketError}</Notice>
+      )}
+
+      {bracketNotice && (
+        <Notice type="success">{bracketNotice}</Notice>
+      )}
 
       {loadingOptions ? (
         <LoadingState />
       ) : (
-        <form onSubmit={handleCreateBracket} className="resource-form">
+        <form
+          onSubmit={handleCreateBracket}
+          className="resource-form"
+        >
           <div className="form-grid">
             <label>
               Sport *
@@ -906,8 +1278,11 @@ function ManualBracketBuilder() {
                 required
               >
                 <option value="">Select a sport</option>
+
                 {sports.map((sport) => (
-                  <option key={sport.id} value={sport.id}>{sport.name}</option>
+                  <option key={sport.id} value={sport.id}>
+                    {sport.name}
+                  </option>
                 ))}
               </select>
             </label>
@@ -942,8 +1317,11 @@ function ManualBracketBuilder() {
             <div className="panel-heading">
               <div>
                 <h3>Arrange teams</h3>
-                <p>Use the arrows to change the order before creating the bracket.</p>
+                <p>
+                  Use the arrows to change the order before creating the bracket.
+                </p>
               </div>
+
               <button
                 type="button"
                 className="button button-light"
@@ -969,20 +1347,31 @@ function ManualBracketBuilder() {
                 >
                   <label style={{ margin: 0 }}>
                     <span style={{ display: 'block', marginBottom: 7 }}>
-                      Position {index + 1} — {index % 2 === 0 ? 'First team' : 'Opponent'}
+                      Position {index + 1} —{' '}
+                      {index % 2 === 0 ? 'First team' : 'Opponent'}
                     </span>
+
                     <select
                       value={teamId}
-                      onChange={(event) => updateTeam(index, event.target.value)}
+                      onChange={(event) =>
+                        updateTeam(index, event.target.value)
+                      }
                     >
                       <option value="">Select a team</option>
+
                       {teams.map((team) => (
                         <option
                           key={team.id}
                           value={team.id}
-                          disabled={selectedTeamSet.has(team.id) && teamId !== team.id}
+                          disabled={
+                            selectedTeamSet.has(team.id) &&
+                            teamId !== team.id
+                          }
                         >
-                          {team.name}{team.abbreviation ? ` (${team.abbreviation})` : ''}
+                          {team.name}
+                          {team.abbreviation
+                            ? ` (${team.abbreviation})`
+                            : ''}
                         </option>
                       ))}
                     </select>
@@ -999,6 +1388,7 @@ function ManualBracketBuilder() {
                     >
                       ↑
                     </button>
+
                     <button
                       type="button"
                       className="icon-button"
@@ -1009,6 +1399,7 @@ function ManualBracketBuilder() {
                     >
                       ↓
                     </button>
+
                     <button
                       type="button"
                       className="icon-button danger-icon"
@@ -1027,7 +1418,9 @@ function ManualBracketBuilder() {
 
           <div style={{ marginTop: 28 }}>
             <h3>First-round preview</h3>
-            <p>Matchups are displayed in the same order that will be submitted.</p>
+            <p>
+              Matchups are displayed in the same order that will be submitted.
+            </p>
 
             {firstRound.length ? (
               <div
@@ -1047,11 +1440,20 @@ function ManualBracketBuilder() {
                     }}
                   >
                     <strong>MATCH {index + 1}</strong>
-                    <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border, #dedede)' }}>
+
+                    <div
+                      style={{
+                        padding: '13px 0',
+                        borderBottom: '1px solid var(--border, #dedede)',
+                      }}
+                    >
                       {getTeamName(match.first)}
                     </div>
+
                     <div style={{ paddingTop: 13 }}>
-                      {match.second ? getTeamName(match.second) : 'BYE'}
+                      {match.second
+                        ? getTeamName(match.second)
+                        : 'BYE'}
                     </div>
                   </div>
                 ))}
@@ -1067,8 +1469,15 @@ function ManualBracketBuilder() {
               className="button button-dark"
               disabled={savingBracket || loadingOptions}
             >
-              {savingBracket ? <RefreshCw className="spin-icon" size={16} /> : <Save size={16} />}
-              {savingBracket ? 'Creating bracket…' : 'Create bracket'}
+              {savingBracket ? (
+                <RefreshCw className="spin-icon" size={16} />
+              ) : (
+                <Save size={16} />
+              )}
+
+              {savingBracket
+                ? 'Creating bracket…'
+                : 'Create bracket'}
             </button>
           </div>
         </form>
@@ -1086,7 +1495,9 @@ export default function ResourcePage({ resource = 'sports' }) {
           title="Tournament Brackets"
           description="Create brackets, arrange teams manually, and manage tournament stages."
         />
+
         <ManualBracketBuilder />
+
         <GenericResourcePage resource="brackets" />
       </>
     );

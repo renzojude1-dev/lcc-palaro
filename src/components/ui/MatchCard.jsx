@@ -1,150 +1,59 @@
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, MapPin, Clock3 } from 'lucide-react';
+import { CalendarDays, MapPin } from 'lucide-react';
 
 import StatusPill from '../common/StatusPill';
 import { formatDateTime } from '../../lib/formatters';
 import { supabase } from '../../lib/supabase';
 
-function isBasketball(match) {
-  const name = String(
-    match.sport?.name || match.sport_name || ''
-  ).toLowerCase();
+function formatDivision(division) {
+  if (!division) return '';
 
-  return name.includes('basketball');
-}
+  const value = String(division).trim().toLowerCase();
 
-function isVolleyball(match) {
-  const name = String(
-    match.sport?.name || match.sport_name || ''
-  ).toLowerCase();
-
-  return name.includes('volleyball');
-}
-
-function formatClock(seconds) {
-  if (seconds === null || seconds === undefined) return '--:--';
-
-  const total = Math.max(0, Math.floor(Number(seconds) || 0));
-  const minutes = Math.floor(total / 60);
-  const remaining = total % 60;
-
-  return `${String(minutes).padStart(2, '0')}:${String(
-    remaining
-  ).padStart(2, '0')}`;
-}
-
-function getClockValue(liveState, now) {
-  if (!liveState) return null;
-
-  let seconds = Number(liveState.game_clock_seconds ?? 0);
-
-  if (liveState.clock_running && liveState.updated_at) {
-    const updatedAt = new Date(liveState.updated_at).getTime();
-
-    if (!Number.isNaN(updatedAt)) {
-      const elapsed = Math.floor(
-        Math.max(0, now - updatedAt) / 1000
-      );
-
-      seconds = Math.max(0, seconds - elapsed);
-    }
+  if (value === 'boys' || value === 'boys division') {
+    return 'BOYS DIVISION';
   }
 
-  return seconds;
-}
-
-function getPeriodLabel(period) {
-  return (
-    period.period_label ||
-    `Period ${period.period_number}`
-  );
-}
-
-function getSetWinner(period) {
-  const home = Number(period.home_score || 0);
-  const away = Number(period.away_score || 0);
-  const number = Number(period.period_number);
-
-  if (home === away) return null;
-
-  const target = number === 3 ? 15 : 25;
-
-  if (
-    Math.max(home, away) >= target &&
-    Math.abs(home - away) >= 2
-  ) {
-    return home > away ? 'home' : 'away';
+  if (value === 'girls' || value === 'girls division') {
+    return 'GIRLS DIVISION';
   }
 
-  return null;
-}
-
-function getSetsWon(periods) {
-  return periods.reduce(
-    (total, period) => {
-      const winner = getSetWinner(period);
-
-      if (winner === 'home') total.home += 1;
-      if (winner === 'away') total.away += 1;
-
-      return total;
-    },
-    { home: 0, away: 0 }
-  );
+  return String(division).trim().toUpperCase();
 }
 
 export default function MatchCard({ match }) {
-  const home = match.home_team || {};
-  const away = match.away_team || {};
+  const home = match.home_team;
+  const away = match.away_team;
 
   const [periodScores, setPeriodScores] = useState([]);
-  const [liveState, setLiveState] = useState(null);
-  const [clockNow, setClockNow] = useState(Date.now());
 
-  const status = String(match.status || '').toLowerCase();
-  const showScore = [
-    'completed',
-    'in_progress',
-    'paused',
-  ].includes(status);
+  const divisionLabel = formatDivision(match.division);
 
-  const basketball = isBasketball(match);
-  const volleyball = isVolleyball(match);
+  const showScore =
+    match.status === 'completed' ||
+    match.status === 'in_progress' ||
+    match.status === 'paused';
 
   useEffect(() => {
     let active = true;
 
-    async function loadMatchDetails() {
-      const [periodResult, liveResult] = await Promise.all([
-        supabase
-          .from('match_period_scores')
-          .select('id, period_number, period_label, home_score, away_score')
-          .eq('match_id', match.id)
-          .order('period_number', { ascending: true }),
+    async function loadPeriodScores() {
+      const { data, error } = await supabase
+        .from('match_period_scores')
+        .select('period_number, period_label, home_score, away_score')
+        .eq('match_id', match.id)
+        .order('period_number', { ascending: true });
 
-        supabase
-          .from('match_live_state')
-          .select('*')
-          .eq('match_id', match.id)
-          .maybeSingle(),
-      ]);
-
-      if (!active) return;
-
-      if (!periodResult.error) {
-        setPeriodScores(periodResult.data || []);
-      }
-
-      if (!liveResult.error) {
-        setLiveState(liveResult.data || null);
+      if (!error && active) {
+        setPeriodScores(data || []);
       }
     }
 
-    loadMatchDetails();
+    loadPeriodScores();
 
-    const periodChannel = supabase
+    const channel = supabase
       .channel(`match-card-periods-${match.id}`)
       .on(
         'postgres_changes',
@@ -154,68 +63,28 @@ export default function MatchCard({ match }) {
           table: 'match_period_scores',
           filter: `match_id=eq.${match.id}`,
         },
-        loadMatchDetails
-      )
-      .subscribe();
-
-    const liveChannel = supabase
-      .channel(`match-card-live-${match.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'match_live_state',
-          filter: `match_id=eq.${match.id}`,
-        },
-        loadMatchDetails
+        () => {
+          loadPeriodScores();
+        }
       )
       .subscribe();
 
     return () => {
       active = false;
-      supabase.removeChannel(periodChannel);
-      supabase.removeChannel(liveChannel);
+      supabase.removeChannel(channel);
     };
   }, [match.id]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setClockNow(Date.now());
-    }, 1000);
-
-    return () => window.clearInterval(interval);
-  }, []);
-
-  const sortedPeriods = [...periodScores].sort(
-    (a, b) => Number(a.period_number) - Number(b.period_number)
-  );
-
-  const setsWon = getSetsWon(sortedPeriods);
-
-  const currentPeriod = Number(liveState?.current_period || 1);
-  const quarterLabel =
-    currentPeriod <= 4
-      ? `Q${currentPeriod}`
-      : `OT${currentPeriod - 4}`;
-
-  const clockValue = getClockValue(liveState, clockNow);
-
-  const venue =
-    typeof match.venue === 'object'
-      ? match.venue?.name
-      : match.venue;
 
   return (
     <Link className="match-card" to={`/matches/${match.id}`}>
       <div className="match-card-top">
-        <span>{match.sport?.name || match.sport_name || 'Competition'}</span>
+        <span>{match.sport?.name || 'Competition'}</span>
         <StatusPill status={match.status} />
       </div>
 
-      {match.division && (
+      {divisionLabel && (
         <div className="match-division">
-          {match.division}
+          {divisionLabel}
         </div>
       )}
 
@@ -224,32 +93,28 @@ export default function MatchCard({ match }) {
           <span
             className="team-emblem"
             style={{
-              '--team-color': home.primary_color || '#e8ad2e',
+              '--team-color': home?.primary_color || '#e8ad2e',
             }}
           >
-            {home.logo_url ? (
+            {home?.logo_url ? (
               <img
                 src={home.logo_url}
                 alt={`${home.name || 'Home team'} logo`}
               />
             ) : (
-              (home.abbreviation || home.name || 'TBD').slice(0, 3)
+              (home?.abbreviation || home?.name || 'TBD').slice(0, 3)
             )}
           </span>
 
-          <b>{home.name || 'TBD'}</b>
+          <b>{home?.name || 'TBD'}</b>
         </div>
 
         <div className="match-score">
           {showScore ? (
             <>
-              <strong>
-                {volleyball ? setsWon.home : match.home_score ?? 0}
-              </strong>
+              <strong>{match.home_score ?? 0}</strong>
               <span>:</span>
-              <strong>
-                {volleyball ? setsWon.away : match.away_score ?? 0}
-              </strong>
+              <strong>{match.away_score ?? 0}</strong>
             </>
           ) : (
             <span className="vs-label">VS</span>
@@ -260,76 +125,30 @@ export default function MatchCard({ match }) {
           <span
             className="team-emblem"
             style={{
-              '--team-color': away.primary_color || '#8793a7',
+              '--team-color': away?.primary_color || '#8793a7',
             }}
           >
-            {away.logo_url ? (
+            {away?.logo_url ? (
               <img
                 src={away.logo_url}
                 alt={`${away.name || 'Away team'} logo`}
               />
             ) : (
-              (away.abbreviation || away.name || 'TBD').slice(0, 3)
+              (away?.abbreviation || away?.name || 'TBD').slice(0, 3)
             )}
           </span>
 
-          <b>{away.name || 'TBD'}</b>
+          <b>{away?.name || 'TBD'}</b>
         </div>
       </div>
 
-      {basketball && (
-        <div className="match-live-period">
-          <strong>{quarterLabel}</strong>
-          <span>
-            <Clock3 size={13} />
-            {formatClock(clockValue)}
-          </span>
-          <small>
-            {status === 'in_progress'
-              ? 'TIME LEFT'
-              : status === 'paused'
-                ? 'PAUSED'
-                : status === 'completed'
-                  ? 'FINAL'
-                  : 'GAME CLOCK'}
-          </small>
-        </div>
-      )}
-
-      {sortedPeriods.length > 0 && (
+      {periodScores.length > 0 && (
         <div className="match-period-scores">
-          {volleyball && (
-            <div className="match-period-heading">
-              SET-BY-SET SCORE
-              <span>
-                {setsWon.home}–{setsWon.away} SETS
-              </span>
-            </div>
-          )}
-
-          {sortedPeriods.map((period) => {
-            const winner = volleyball ? getSetWinner(period) : null;
-
-            return (
-              <span
-                className="match-period-score-row"
-                key={period.id || period.period_number}
-              >
-                <b>{getPeriodLabel(period)}</b>
-                <strong>
-                  {period.home_score}–{period.away_score}
-                </strong>
-                {winner && (
-                  <small>
-                    {winner === 'home'
-                      ? home.abbreviation || home.name
-                      : away.abbreviation || away.name}{' '}
-                    won
-                  </small>
-                )}
-              </span>
-            );
-          })}
+          {periodScores.map((period) => (
+            <span key={period.period_number}>
+              {period.period_label}: {period.home_score}–{period.away_score}
+            </span>
+          ))}
         </div>
       )}
 
@@ -341,12 +160,8 @@ export default function MatchCard({ match }) {
 
         <span>
           <MapPin size={14} />
-          {venue || 'Venue TBA'}
+          {match.venue?.name || 'Venue TBA'}
         </span>
-      </div>
-
-      <div className="match-card-open-hint">
-        View match details <span>→</span>
       </div>
     </Link>
   );

@@ -5768,3 +5768,47 @@ body,
   }
 }
 
+/* =========================================
+   MATCH DIVISION LABEL
+   Schedule and Results
+========================================= */
+
+.match-division {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+
+  margin: -8px 0 17px;
+  padding: 7px 12px;
+
+  background: linear-gradient(
+    135deg,
+    #f8d878 0%,
+    #f2bd48 55%,
+    #dfa52c 100%
+  );
+
+  color: #172033;
+  border: 1px solid #d9a52f;
+  border-radius: 6px;
+
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1.2;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+
+  box-shadow: 0 3px 8px rgba(180, 129, 26, 0.15);
+}
+
+/* Keep the label readable on smaller screens */
+@media (max-width: 560px) {
+  .match-division {
+    font-size: 9px;
+    padding: 7px 10px;
+    letter-spacing: 1px;
+  }
+}
+
