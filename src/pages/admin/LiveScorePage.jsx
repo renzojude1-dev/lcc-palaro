@@ -29,15 +29,15 @@ const SPORT_CONFIGS = [
     hasFouls: true,
   },
   {
-    matches: ['volleyball'],
-    type: 'sets',
-    periods: ['Set 1', 'Set 2', 'Set 3', 'Set 4', 'Set 5'],
-    scoring: [1],
-    target: 25,
-    decidingTarget: 15,
-    winBy: 2,
-    bestof: 5,
-  },
+  matches: ['volleyball'],
+  type: 'sets',
+  periods: ['Set 1', 'Set 2', 'Set 3'],
+  scoring: [1],
+  target: 25,
+  decidingTarget: 15,
+  winBy: 2,
+  bestof: 3,
+},
   {
     matches: ['badminton'],
     type: 'racket',
@@ -231,10 +231,11 @@ function getPeriodWinner(period, config, periodNumber) {
   if (home === away) return null;
 
   if (config.type === 'sets' || config.type === 'racket') {
-    const target =
-      config.type === 'sets' && periodNumber === 5
-        ? config.decidingTarget || config.target
-        : config.target;
+   const target =
+  config.type === 'sets' &&
+  periodNumber === config.bestof
+    ? config.decidingTarget || config.target
+    : config.target;
 
     const high = Math.max(home, away);
     const low = Math.min(home, away);
@@ -1240,68 +1241,83 @@ export default function LiveScorePage() {
   );
 
   async function finishMatch() {
-    if (!selected || saving) return;
+  if (!selected || saving) return;
 
-    if (
-      ['sets', 'racket', 'tennis'].includes(config.type) &&
-      !periodMatchOver
-    ) {
-      const confirmed = window.confirm(
-        'The configured sets/games victory condition has not been reached. Finish this match anyway?'
-      );
+  const confirmed = window.confirm(
+    `Are you sure you want to end this match?\n\n` +
+    `${homeName}: ${totals.home}\n` +
+    `${awayName}: ${totals.away}\n\n` +
+    `This will finalize the match result.`
+  );
 
-      if (!confirmed) return;
-    }
+  if (!confirmed) return;
 
-    if (homeScore === awayScore) {
-      const confirmTie = window.confirm(
-        'The overall score is tied. Finish this match without selecting a winner?'
-      );
+  setSaving(true);
+  setError('');
+  setNotice('');
 
-      if (!confirmTie) return;
-    }
+  setClockRunningValue(false);
+  setShotClockRunningValue(false);
 
-    setSaving(true);
-    setError('');
-    setNotice('');
+  try {
+    const winner =
+      totals.home > totals.away
+        ? selected.home_team_id
+        : totals.away > totals.home
+        ? selected.away_team_id
+        : null;
 
-    setClockRunningValue(false);
-    setShotClockRunningValue(false);
+    // Save the final calculated scores.
+    const { error: scoreError } = await supabase
+      .from('matches')
+      .update({
+        home_score: totals.home,
+        away_score: totals.away,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', selected.id);
 
-    try {
-      await saveLiveState(selected.id, {
-        current_period: activePeriod,
-        game_clock_seconds: clockRef.current,
-        clock_running: false,
-        shot_clock_seconds: shotClockRef.current,
-        shot_clock_running: false,
-      });
+    if (scoreError) throw scoreError;
 
-      const winner = getMatchWinner(selected);
+    // Stop and save all clocks.
+    await saveLiveState(selected.id, {
+      current_period: activePeriod,
+      game_clock_seconds: clockRef.current,
+      clock_running: false,
+      shot_clock_seconds: shotClockRef.current,
+      shot_clock_running: false,
+    });
 
-      const result = await finalizeMatch(selected.id, winner);
+    // Finalize the match.
+    const result = await finalizeMatch(selected.id, winner);
 
-      if (result.error) throw result.error;
+    if (result.error) throw result.error;
 
-      setMatches((current) =>
-        current.map((match) =>
-          match.id === selected.id
-            ? {
-                ...match,
-                status: 'completed',
-                winner_team_id: winner,
-              }
-            : match
-        )
-      );
+    setMatches((current) =>
+      current.map((match) =>
+        match.id === selected.id
+          ? {
+              ...match,
+              home_score: totals.home,
+              away_score: totals.away,
+              status: 'completed',
+              winner_team_id: winner,
+            }
+          : match
+      )
+    );
 
-      setNotice('Match marked as completed.');
-    } catch (err) {
-      setError(`Unable to finish match: ${err.message}`);
-    } finally {
-      setSaving(false);
-    }
+    setNotice(
+      winner
+        ? `${winner === selected.home_team_id ? homeName : awayName} wins! Match successfully completed.`
+        : 'Match completed with a tie.'
+    );
+  } catch (err) {
+    setError(`Unable to finish match: ${err.message}`);
+  } finally {
+    setSaving(false);
   }
+}
 
   function renderScoringButtons(team) {
     const displayedScore =

@@ -1,3 +1,4 @@
+
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -33,7 +34,10 @@ function formatDate(value) {
   if (!value) return 'Schedule TBD';
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
 
   return date.toLocaleString('en-PH', {
     month: 'short',
@@ -65,6 +69,51 @@ function isVolleyball(match) {
   return sport.includes('volleyball');
 }
 
+function isBasketball(match) {
+  const sport = String(
+    match.sport?.name || match.sport_name || ''
+  ).toLowerCase();
+
+  return sport.includes('basketball');
+}
+
+function formatGameClock(seconds) {
+  if (seconds === null || seconds === undefined) {
+    return '--:--';
+  }
+
+  const value = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(value / 60);
+  const remainingSeconds = value % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(
+    remainingSeconds
+  ).padStart(2, '0')}`;
+}
+
+function getDisplayedGameClock(liveState, clockNow) {
+  if (!liveState) return null;
+
+  let seconds = Number(liveState.game_clock_seconds ?? 0);
+
+  if (
+    liveState.clock_running &&
+    liveState.updated_at
+  ) {
+    const lastUpdated = new Date(liveState.updated_at).getTime();
+
+    if (!Number.isNaN(lastUpdated)) {
+      const elapsedSeconds = Math.floor(
+        Math.max(0, clockNow - lastUpdated) / 1000
+      );
+
+      seconds = Math.max(0, seconds - elapsedSeconds);
+    }
+  }
+
+  return seconds;
+}
+
 function getTeamAbbreviation(team, fallback = 'TEAM') {
   const abbreviation =
     team?.abbreviation ||
@@ -91,6 +140,10 @@ function getTeamAbbreviation(team, fallback = 'TEAM') {
   return initials || fallback;
 }
 
+/* VOLLEYBALL: BEST OF 3
+   Sets 1 and 2: first to 25, win by 2.
+   Set 3: first to 15, win by 2.
+*/
 function getSetWinner(period) {
   const home = Number(period.home_score || 0);
   const away = Number(period.away_score || 0);
@@ -98,7 +151,7 @@ function getSetWinner(period) {
   if (home === away) return null;
 
   const setNumber = Number(period.period_number);
-  const target = setNumber === 5 ? 15 : 25;
+  const target = setNumber === 3 ? 15 : 25;
 
   if (
     Math.max(home, away) >= target &&
@@ -110,7 +163,7 @@ function getSetWinner(period) {
   return null;
 }
 
-function calculateSetsWon(periods) {
+function calculateSetsWon(periods = []) {
   return periods.reduce(
     (total, period) => {
       const winner = getSetWinner(period);
@@ -256,9 +309,9 @@ function VolleyballBreakdown({
             opacity: 0.8,
           }}
         >
-          BEST OF 5
+          BEST OF 3
           <br />
-          FIRST TO 3 SETS
+          FIRST TO 2 SETS
         </div>
       </div>
 
@@ -285,22 +338,36 @@ function VolleyballBreakdown({
           </div>
         ))}
 
-        {sortedPeriods.map((period) => {
-          const winner = getSetWinner(period);
-          const setNumber = Number(period.period_number);
+        {[1, 2, 3].map((setNumber) => {
+          const period = sortedPeriods.find(
+            (item) => Number(item.period_number) === setNumber
+          );
 
-          const home = Number(period.home_score || 0);
-          const away = Number(period.away_score || 0);
+          const winner = period ? getSetWinner(period) : null;
+          const home = Number(period?.home_score || 0);
+          const away = Number(period?.away_score || 0);
 
           const isCurrent =
             isLive &&
             !winner &&
-            activeSet?.period_number === period.period_number;
+            Number(
+              period?.period_number
+            ) === Number(
+              sortedPeriods.find((item) => {
+                const itemHome = Number(item.home_score || 0);
+                const itemAway = Number(item.away_score || 0);
+
+                return (
+                  !getSetWinner(item) &&
+                  (itemHome > 0 || itemAway > 0)
+                );
+              })?.period_number
+            );
 
           const hasScore = home > 0 || away > 0;
 
           return (
-            <React.Fragment key={period.id || setNumber}>
+            <React.Fragment key={setNumber}>
               <div
                 style={{
                   textAlign: 'center',
@@ -313,7 +380,6 @@ function VolleyballBreakdown({
                 }}
               >
                 S{setNumber}
-
                 {isCurrent && (
                   <div style={{ fontSize: 8 }}>LIVE</div>
                 )}
@@ -385,7 +451,7 @@ function VolleyballBreakdown({
             color: '#334155',
           }}
         >
-          Current: <strong>{activeSet.period_label}</strong>
+          Current: <strong>{activeSet.period_label || `Set ${activeSet.period_number}`}</strong>
           {' — '}
           <strong>
             {Number(activeSet.home_score || 0)}
@@ -411,7 +477,12 @@ function VolleyballBreakdown({
   );
 }
 
-function MatchCard({ match, periodScores = [] }) {
+function MatchCard({
+  match,
+  periodScores = [],
+  liveState = null,
+  clockNow,
+}) {
   const home = match.home_team || {};
   const away = match.away_team || {};
 
@@ -424,6 +495,14 @@ function MatchCard({ match, periodScores = [] }) {
   const isFinal = ['completed', 'finished'].includes(status);
 
   const volleyball = isVolleyball(match);
+  const basketball = isBasketball(match);
+
+  const currentQuarter = Number(liveState?.current_period || 1);
+
+  const quarterLabel =
+    currentQuarter <= 4
+      ? `Q${currentQuarter}`
+      : `OT${currentQuarter - 4}`;
 
   const sportName =
     match.sport?.name || match.sport_name || 'Sports Event';
@@ -436,6 +515,11 @@ function MatchCard({ match, periodScores = [] }) {
   const sets = volleyball
     ? calculateSetsWon(periodScores)
     : null;
+
+  const displayedClock = getDisplayedGameClock(
+    liveState,
+    clockNow
+  );
 
   return (
     <article
@@ -470,7 +554,11 @@ function MatchCard({ match, periodScores = [] }) {
             </span>
           </div>
 
-          <strong className={`home-match-score ${isLive ? 'score-highlight' : ''}`}>
+          <strong
+            className={`home-match-score ${
+              isLive ? 'score-highlight' : ''
+            }`}
+          >
             {volleyball
               ? sets.home
               : match.home_score ??
@@ -487,7 +575,11 @@ function MatchCard({ match, periodScores = [] }) {
             </span>
           </div>
 
-          <strong className={`home-match-score ${isLive ? 'score-highlight' : ''}`}>
+          <strong
+            className={`home-match-score ${
+              isLive ? 'score-highlight' : ''
+            }`}
+          >
             {volleyball
               ? sets.away
               : match.away_score ??
@@ -495,6 +587,63 @@ function MatchCard({ match, periodScores = [] }) {
           </strong>
         </div>
       </div>
+
+      {basketball && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 12,
+            marginTop: 12,
+            padding: '10px 14px',
+            borderRadius: 8,
+            background: isLive
+              ? 'rgba(34, 197, 94, 0.10)'
+              : 'rgba(148, 163, 184, 0.10)',
+            border: '1px solid rgba(148, 163, 184, 0.20)',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              color: isLive ? '#16a34a' : '#64748b',
+            }}
+          >
+            {quarterLabel}
+          </span>
+
+          <span style={{ color: '#94a3b8' }}>•</span>
+
+          <span
+            style={{
+              fontSize: 17,
+              fontWeight: 900,
+              fontVariantNumeric: 'tabular-nums',
+              color: 'inherit',
+            }}
+          >
+            {formatGameClock(displayedClock)}
+          </span>
+
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              color: '#64748b',
+            }}
+          >
+            {isLive
+              ? 'GAME TIME'
+              : isPaused
+                ? 'PAUSED'
+                : isFinal
+                  ? 'FINAL'
+                  : 'GAME CLOCK'}
+          </span>
+        </div>
+      )}
 
       {volleyball && (
         <VolleyballBreakdown
@@ -555,6 +704,9 @@ export default function HomePage() {
   const [teams, setTeams] = useState([]);
   const [matches, setMatches] = useState([]);
   const [periodScores, setPeriodScores] = useState({});
+  const [liveStates, setLiveStates] = useState({});
+  const [clockNow, setClockNow] = useState(Date.now());
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -587,21 +739,28 @@ export default function HomePage() {
       setMatches(matchData);
 
       const volleyballMatches = matchData.filter(isVolleyball);
+      const matchIds = matchData.map((match) => match.id);
 
+      // Load volleyball set scores.
       if (volleyballMatches.length > 0) {
-        const ids = volleyballMatches.map((match) => match.id);
+        const volleyballIds = volleyballMatches.map(
+          (match) => match.id
+        );
 
-        const { data, error: periodError } = await supabase
+        const {
+          data: periodData,
+          error: periodError,
+        } = await supabase
           .from('match_period_scores')
           .select('*')
-          .in('match_id', ids)
+          .in('match_id', volleyballIds)
           .order('period_number', { ascending: true });
 
         if (periodError) throw periodError;
 
         const grouped = {};
 
-        (data || []).forEach((period) => {
+        (periodData || []).forEach((period) => {
           if (!grouped[period.match_id]) {
             grouped[period.match_id] = [];
           }
@@ -612,6 +771,29 @@ export default function HomePage() {
         setPeriodScores(grouped);
       } else {
         setPeriodScores({});
+      }
+
+      // Load live match states, including basketball quarter and clock.
+      if (matchIds.length > 0) {
+        const {
+          data: liveData,
+          error: liveError,
+        } = await supabase
+          .from('match_live_state')
+          .select('*')
+          .in('match_id', matchIds);
+
+        if (liveError) throw liveError;
+
+        const liveGrouped = {};
+
+        (liveData || []).forEach((state) => {
+          liveGrouped[state.match_id] = state;
+        });
+
+        setLiveStates(liveGrouped);
+      } else {
+        setLiveStates({});
       }
 
       setError('');
@@ -626,12 +808,21 @@ export default function HomePage() {
   useEffect(() => {
     loadData();
 
-    const intervalId = window.setInterval(() => {
+    const refreshInterval = window.setInterval(() => {
       loadData(true);
     }, 10000);
 
-    return () => window.clearInterval(intervalId);
+    return () => window.clearInterval(refreshInterval);
   }, [loadData]);
+
+  // Update the displayed basketball clock every second.
+  useEffect(() => {
+    const clockInterval = window.setInterval(() => {
+      setClockNow(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(clockInterval);
+  }, []);
 
   const liveMatches = matches.filter((match) =>
     ['in_progress', 'paused'].includes(
@@ -678,6 +869,8 @@ export default function HomePage() {
           key={match.id}
           match={match}
           periodScores={periodScores[match.id] || []}
+          liveState={liveStates[match.id] || null}
+          clockNow={clockNow}
         />
       ))}
     </div>
@@ -685,45 +878,43 @@ export default function HomePage() {
 
   return (
     <main className="simple-home">
-      
-<header className="palaro-header">
-  <div className="palaro-light palaro-light-left" />
-  <div className="palaro-light palaro-light-right" />
+      <header className="palaro-header">
+        <div className="palaro-light palaro-light-left" />
+        <div className="palaro-light palaro-light-right" />
 
-  <div className="palaro-hero-content">
-    <div className="palaro-institution">
-      <div className="palaro-institution-seal">
-        LCC
-      </div>
+        <div className="palaro-hero-content">
+          <div className="palaro-institution">
+            <div className="palaro-institution-seal">
+              LCC
+            </div>
 
-      <div>
-        <strong>LIPA CITY COLLEGES</strong>
-        <span>STUDENT AFFAIRS OFFICE</span>
-        <span>CENTRAL STUDENT GOVERNMENT</span>
-      </div>
-    </div>
+            <div>
+              <strong>LIPA CITY COLLEGES</strong>
+              <span>STUDENT AFFAIRS OFFICE</span>
+              <span>CENTRAL STUDENT GOVERNMENT</span>
+            </div>
+          </div>
 
-    <div className="palaro-title-banner">
-      <span className="palaro-title-text">
-        LCC <em>PALARO</em>
-      </span>
-      <span className="palaro-flame"></span>
-    </div>
+          <div className="palaro-title-banner">
+            <span className="palaro-title-text">
+              LCC <em>PALARO</em>
+            </span>
+            <span className="palaro-flame" />
+          </div>
 
-    <p className="palaro-motto">
-      CONQUER. SHAPING LCCIAN EXCELLENCE
-      <br />
-      THROUGH SPORTS AND COLLABORATION
-    </p>
+          <p className="palaro-motto">
+            CONQUER. SHAPING LCCIAN EXCELLENCE
+            <br />
+            THROUGH SPORTS AND COLLABORATION
+          </p>
 
-    <div className="palaro-year">
-      <span />
-      2026
-      <span />
-    </div>
-  </div>
-</header>
-
+          <div className="palaro-year">
+            <span />
+            2026
+            <span />
+          </div>
+        </div>
+      </header>
 
       {/* COMPETING TEAMS */}
       <section className="home-teams-section featured-teams-section">
@@ -734,7 +925,9 @@ export default function HomePage() {
               CHAMPIONSHIP CONTENDERS
             </span>
 
-            <h2 className="teams-hero-title">COMPETING TEAMS</h2>
+            <h2 className="teams-hero-title">
+              COMPETING TEAMS
+            </h2>
 
             <p className="teams-hero-sub">
               Select your team to check stats, schedule, and roster
